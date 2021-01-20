@@ -4,17 +4,21 @@ TERMINAL=false
 DIMENSION=1920x1080+0+0
 RESET=false
 
-__wm_set_rule() { [ $WM == "bspwm" ] && bspc rule -a $CLASS:$INSTANCE -o state=floating; }
-__wm_toggle_hidden() { wmctrl -b toggle,hidden -ir $WID; }
-__win_visible() { [[ -z $(xprop -id $WID | grep "_NET_WM_STATE(ATOM)" | awk -F= '{print $2}') ]]; }
+__wm_rule() { [[ "$WM" == "bspwm" ]] && bspc rule -a $CLASS:$INSTANCE -o state=floating; }
+__wm_hide() { wmctrl -b add,hidden -ir $WID; }
+__wm_show() { wmctrl -b remove,hidden -ir $WID; }
+__win_visible() {
+  test -z $(xprop -id $WID | grep "_NET_WM_STATE(ATOM)" | awk -F= '{print $2}') && \
+  test $(xdotool get_desktop) -eq $(xdotool get_desktop_for_window $WID)
+}
 __wid_expired() {
   curr_instance=$(xprop -id $WID | grep "WM_CLASS(STRING)" | awk '{print $3}' | tr -d ',"')
   [[ "$curr_instance" != "$INSTANCE" ]]
 }
+__hide_window () { __wm_hide; }
 __show_window() {
   xdotool set_desktop_for_window "$WID" "$(xdotool get_desktop)"
-  __wm_toggle_hidden
-  xdotool windowactivate $WID
+  __wm_show; xdotool windowactivate $WID
 }
 __parse_dimension() {
   W=$(awk -F+ '{print $1}' <<< $DIMENSION | awk -Fx '{print $1}' | tee $FLOATWIN_STATE/$APP)
@@ -23,15 +27,13 @@ __parse_dimension() {
   Y=$(awk -F+ '{print $3}' <<< $DIMENSION | tee -a $FLOATWIN_STATE/$APP)
 }
 __create_window() {
-  killall $APP 2>/dev/null
-  __wm_set_rule
-  __parse_dimension
+  killall $APP 2>/dev/null; __wm_rule; __parse_dimension
   t_cmd=(alacritty --class $CLASS,$INSTANCE)
   [[ "$APP" == "dropterm" ]] || t_cmd+=("-e $APP")
   $TERMINAL && eval "${t_cmd[@]} &" || eval "${CMD[@]} &"
   local new_wid=$(xdo id -md -N $CLASS -n $INSTANCE | tee -a $FLOATWIN_STATE/$APP)
-  wid=$new_wid
-  xdotool windowmap $wid windowmove $wid $X $Y windowsize $wid $W $H
+  wid=$new_wid w=$W h=$H x=$X y=$Y
+  xdotool windowmap $wid windowmove $wid $x $y windowsize $wid $w $h
 }
 
 _meta() {
@@ -41,7 +43,7 @@ _meta() {
 }
 _toggle_or_create() {
   if __wid_expired; then __create_window
-  elif __win_visible; then __wm_toggle_hidden
+  elif __win_visible; then __hide_window
   else __show_window
   fi
 }
@@ -64,7 +66,7 @@ main() {
   WM=$(cat "$FLOATWIN_STATE/000META")
   CMD="$@"
   APP=${1:-dropterm}
-  "$RESET" && { rm -rf $FLOATWIN_STATE; echo "cache cleared."; exit 0;}
+  "$RESET" && { rm -rf $FLOATWIN_STATE; echo "cache cleared."; exit 0; }
   CLASS=${CLASS:-$APP}
   INSTANCE=${INSTANCE:-$CLASS}
   WID=$(tail -n 1 "$FLOATWIN_STATE/$APP" 2>/dev/null)
