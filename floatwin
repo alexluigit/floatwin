@@ -2,6 +2,7 @@
 FLOATWIN_STATE="$XDG_CACHE_HOME/floatwin"
 TERMINAL=false
 DIMENSION=1920x1080+0+0
+RESET=false
 
 __wm_set_rule() { [ $WM == "bspwm" ] && bspc rule -a $CLASS:$INSTANCE -o state=floating; }
 __wm_toggle_hidden() { wmctrl -b toggle,hidden -ir $WID; }
@@ -16,10 +17,10 @@ __show_window() {
   xdotool windowactivate $WID
 }
 __parse_dimension() {
-  w=$(awk -F+ '{print $1}' <<< $DIMENSION | awk -Fx '{print $1}')
-  h=$(awk -F+ '{print $1}' <<< $DIMENSION | awk -Fx '{print $2}')
-  x=$(awk -F+ '{print $2}' <<< $DIMENSION)
-  y=$(awk -F+ '{print $3}' <<< $DIMENSION)
+  W=$(awk -F+ '{print $1}' <<< $DIMENSION | awk -Fx '{print $1}' | tee $FLOATWIN_STATE/$APP)
+  H=$(awk -F+ '{print $1}' <<< $DIMENSION | awk -Fx '{print $2}' | tee -a $FLOATWIN_STATE/$APP)
+  X=$(awk -F+ '{print $2}' <<< $DIMENSION | tee -a $FLOATWIN_STATE/$APP)
+  Y=$(awk -F+ '{print $3}' <<< $DIMENSION | tee -a $FLOATWIN_STATE/$APP)
 }
 __create_window() {
   killall $APP 2>/dev/null
@@ -28,8 +29,9 @@ __create_window() {
   t_cmd=(alacritty --class $CLASS,$INSTANCE)
   [[ "$APP" == "dropterm" ]] || t_cmd+=("-e $APP")
   $TERMINAL && eval "${t_cmd[@]} &" || eval "${CMD[@]} &"
-  local new_wid=$(xdo id -md -N $CLASS -n $INSTANCE | tee $FLOATWIN_STATE/$APP)
-  xdotool windowmap $new_wid windowmove $new_wid $x $y windowsize $new_wid $w $h
+  local new_wid=$(xdo id -md -N $CLASS -n $INSTANCE | tee -a $FLOATWIN_STATE/$APP)
+  wid=$new_wid
+  xdotool windowmap $wid windowmove $wid $X $Y windowsize $wid $W $H
 }
 
 _meta() {
@@ -47,7 +49,7 @@ _toggle_or_create() {
 main() {
   [[ -d "$FLOATWIN_STATE" ]] || mkdir -p $FLOATWIN_STATE
   [[ -f "$FLOATWIN_STATE/000META" ]] || _meta
-  while getopts "a:b:c:d:i:t" opt; do
+  while getopts "a:b:c:d:i:tr" opt; do
     case $opt in
       a) AFTER=$OPTARG;;
       b) BEFORE=$OPTARG;;
@@ -55,15 +57,17 @@ main() {
       d) DIMENSION=$OPTARG;;
       i) INSTANCE=$OPTARG;;
       t) TERMINAL=true;;
+      r) RESET=true;;
     esac
   done
   shift $((OPTIND -1))
   WM=$(cat "$FLOATWIN_STATE/000META")
   CMD="$@"
   APP=${1:-dropterm}
+  "$RESET" && { rm -rf $FLOATWIN_STATE; echo "cache cleared."; exit 0;}
   CLASS=${CLASS:-$APP}
   INSTANCE=${INSTANCE:-$CLASS}
-  WID=$(cat "$FLOATWIN_STATE/$APP" 2>/dev/null)
+  WID=$(tail -n 1 "$FLOATWIN_STATE/$APP" 2>/dev/null)
   [ -n "$BEFORE" ] && ! pgrep "$BEFORE" >/dev/null && eval "$BEFORE &"
   _toggle_or_create
   [ -n "$AFTER" ] && ! pgrep "$AFTER" >/dev/null && eval "$AFTER &" || true
