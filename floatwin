@@ -6,18 +6,17 @@ DIMENSION=1920x1080+0+0
 __win_info() { bspc query -T -n $WID | jq "$@" | tr -d '"'; }
 __wm_set_rule() { bspc rule -a $CLASS:$INSTANCE -o state=floating rectangle=$DIMENSION sticky=on; }
 __wm_unset_rule() { bspc rule -r $CLASS:$INSTANCE; }
-__wm_hide_window() { bspc node $WID --flag hidden=on; }
-__wm_show_window() { bspc node $WID --flag hidden=off; }
+__wm_toggle_hidden() {  wmctrl -b toggle,hidden -ir $WID; }
 
 _win_visible() { ! $(__win_info .hidden); }
 _wid_expired() {
   wid_instance=$(__win_info .client.instanceName)
   [[ "$wid_instance" != "$INSTANCE" ]]
 }
-_hide_window() { __wm_hide_window; }
+_hide_window() { __wm_toggle_hidden; }
 _show_window() {
   xdotool set_desktop_for_window "$WID" "$(xdotool get_desktop)"
-  __wm_show_window
+  __wm_toggle_hidden
   xdotool windowactivate $WID
 }
 _create_window() {
