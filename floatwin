@@ -3,40 +3,50 @@ FLOATWIN_STATE="$XDG_CACHE_HOME/floatwin"
 TERMINAL=false
 DIMENSION=1920x1080+0+0
 
-__win_info() { bspc query -T -n $WID | jq "$@" | tr -d '"'; }
-__wm_set_rule() { bspc rule -a $CLASS:$INSTANCE -o state=floating rectangle=$DIMENSION sticky=on; }
-__wm_unset_rule() { bspc rule -r $CLASS:$INSTANCE; }
-__wm_toggle_hidden() {  wmctrl -b toggle,hidden -ir $WID; }
-
-_win_visible() { ! $(__win_info .hidden); }
-_wid_expired() {
-  wid_instance=$(__win_info .client.instanceName)
-  [[ "$wid_instance" != "$INSTANCE" ]]
+__wm_set_rule() { [ $WM == "bspwm" ] && bspc rule -a $CLASS:$INSTANCE -o state=floating; }
+__wm_toggle_hidden() { wmctrl -b toggle,hidden -ir $WID; }
+__win_visible() { [[ -z $(xprop -id $WID | grep "_NET_WM_STATE(ATOM)" | awk -F= '{print $2}') ]]; }
+__wid_expired() {
+  curr_instance=$(xprop -id $WID | grep "WM_CLASS(STRING)" | awk '{print $3}' | tr -d ',"')
+  [[ "$curr_instance" != "$INSTANCE" ]]
 }
-_hide_window() { __wm_toggle_hidden; }
-_show_window() {
+__show_window() {
   xdotool set_desktop_for_window "$WID" "$(xdotool get_desktop)"
   __wm_toggle_hidden
   xdotool windowactivate $WID
 }
-_create_window() {
+__parse_dimension() {
+  w=$(awk -F+ '{print $1}' <<< $DIMENSION | awk -Fx '{print $1}')
+  h=$(awk -F+ '{print $1}' <<< $DIMENSION | awk -Fx '{print $2}')
+  x=$(awk -F+ '{print $2}' <<< $DIMENSION)
+  y=$(awk -F+ '{print $3}' <<< $DIMENSION)
+}
+__create_window() {
   killall $APP 2>/dev/null
   __wm_set_rule
+  __parse_dimension
   t_cmd=(alacritty --class $CLASS,$INSTANCE)
   [[ "$APP" == "dropterm" ]] || t_cmd+=("-e $APP")
   $TERMINAL && eval "${t_cmd[@]} &" || eval "${CMD[@]} &"
-  xdo id -md -N $CLASS -n $INSTANCE > $FLOATWIN_STATE/$APP
-  __wm_unset_rule
+  local new_wid=$(xdo id -md -N $CLASS -n $INSTANCE | tee $FLOATWIN_STATE/$APP)
+  xdotool windowmap $new_wid windowmove $new_wid $x $y windowsize $new_wid $w $h
+}
+
+_meta() {
+  local id=$(xprop -root -notype _NET_SUPPORTING_WM_CHECK | awk '{print $NF}')
+  local wm=$(xprop -notype -id $id _NET_WM_NAME | awk '{print $NF}' | tr -d '"')
+  echo $wm > $FLOATWIN_STATE/000META
 }
 _toggle_or_create() {
-  if _wid_expired; then _create_window
-  elif _win_visible; then _hide_window
-  else _show_window
+  if __wid_expired; then __create_window
+  elif __win_visible; then __wm_toggle_hidden
+  else __show_window
   fi
 }
 
 main() {
   [[ -d "$FLOATWIN_STATE" ]] || mkdir -p $FLOATWIN_STATE
+  [[ -f "$FLOATWIN_STATE/000META" ]] || _meta
   while getopts "a:b:c:d:i:t" opt; do
     case $opt in
       a) AFTER=$OPTARG;;
@@ -48,6 +58,7 @@ main() {
     esac
   done
   shift $((OPTIND -1))
+  WM=$(cat "$FLOATWIN_STATE/000META")
   CMD="$@"
   APP=${1:-dropterm}
   CLASS=${CLASS:-$APP}
