@@ -1,78 +1,86 @@
 #!/bin/sh
-FLOATWIN_STATE="$XDG_CACHE_HOME/floatwin"
-TERMINAL=false
-DIMENSION=1920x1080+0+0
-RESET=false
-
-__wm_rule() { [[ "$WM" == "bspwm" ]] && bspc rule -a $CLASS:$INSTANCE -o state=floating; }
+__wm_rule() { [[ $WM == "bspwm" ]] && bspc rule -a $CLASS:$INSTANCE -o state=floating; }
 __wm_hide() { wmctrl -b add,hidden -ir $WID; }
 __wm_show() { wmctrl -b remove,hidden -ir $WID; }
-__win_visible() {
+__parse_dimension() {
+  W=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $FLOATWIN/$APP)
+  H=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $FLOATWIN/$APP)
+  X=$(awk -F+ '{print $2}' <<< $GEO | tee -a $FLOATWIN/$APP)
+  Y=$(awk -F+ '{print $3}' <<< $GEO | tee -a $FLOATWIN/$APP)
+}
+
+_win_visible() {
   test -z $(xprop -id $WID | grep "_NET_WM_STATE(ATOM)" | awk -F= '{print $2}') && \
   test $(xdotool get_desktop) -eq $(xdotool get_desktop_for_window $WID)
 }
-__wid_expired() {
-  curr_instance=$(xprop -id $WID | grep "WM_CLASS(STRING)" | awk '{print $3}' | tr -d ',"')
+_wid_expired() {
+  curr_instance=$(xprop -id $WID 2>/dev/null | grep "WM_CLASS(STRING)" \
+  | awk '{print $3}' | tr -d ',"')
   [[ "$curr_instance" != "$INSTANCE" ]]
 }
-__hide_window () { __wm_hide; }
-__show_window() {
+_hide_window () { __wm_hide; }
+_show_window() {
   xdotool set_desktop_for_window "$WID" "$(xdotool get_desktop)"
   __wm_show; xdotool windowactivate $WID
 }
-__parse_dimension() {
-  W=$(awk -F+ '{print $1}' <<< $DIMENSION | awk -Fx '{print $1}' | tee $FLOATWIN_STATE/$APP)
-  H=$(awk -F+ '{print $1}' <<< $DIMENSION | awk -Fx '{print $2}' | tee -a $FLOATWIN_STATE/$APP)
-  X=$(awk -F+ '{print $2}' <<< $DIMENSION | tee -a $FLOATWIN_STATE/$APP)
-  Y=$(awk -F+ '{print $3}' <<< $DIMENSION | tee -a $FLOATWIN_STATE/$APP)
-}
-__create_window() {
-  killall $APP 2>/dev/null; __wm_rule; __parse_dimension
+_create_window() {
+  local wid timeout=1000 exceeded=false
+  __wm_rule; __parse_dimension
   t_cmd=(alacritty --class $CLASS,$INSTANCE)
-  [[ "$APP" == "dropterm" ]] || t_cmd+=("-e $APP")
+  [[ "$APP" == "dropterm" ]] || t_cmd+=("-e ${CMD[@]}")
   $TERMINAL && eval "${t_cmd[@]} &" || eval "${CMD[@]} &"
-  local new_wid=$(xdo id -md -N $CLASS -n $INSTANCE | tee -a $FLOATWIN_STATE/$APP)
+  counter=0
+  while true; do
+    new_wid=$(xdo id -d -N $CLASS -n $INSTANCE)
+    [[ -n $new_wid ]] && break
+    [[ $counter -gt $timeout ]] && { exceeded=true; break; }
+    sleep .01; counter=$((counter + 1))
+  done
+  $exceeded && notify-send.py -t 1000 "Timeout exceeded." && exit 1;
   wid=$new_wid w=$W h=$H x=$X y=$Y
   xdotool windowmap $wid windowmove $wid $x $y windowsize $wid $w $h
+  echo $wid >> $FLOATWIN/$APP
 }
 
-_meta() {
+meta() {
   local id=$(xprop -root -notype _NET_SUPPORTING_WM_CHECK | awk '{print $NF}')
   local wm=$(xprop -notype -id $id _NET_WM_NAME | awk '{print $NF}' | tr -d '"')
-  echo $wm > $FLOATWIN_STATE/000META
+  echo $wm > $FLOATWIN/000META
 }
-_toggle_or_create() {
-  if __wid_expired; then __create_window
-  elif __win_visible; then __hide_window
-  else __show_window
+toggle_or_create() {
+  if _wid_expired; then _create_window
+  elif _win_visible; then _hide_window
+  else _show_window
   fi
 }
 
-main() {
-  [[ -d "$FLOATWIN_STATE" ]] || mkdir -p $FLOATWIN_STATE
-  [[ -f "$FLOATWIN_STATE/000META" ]] || _meta
-  while getopts "a:b:c:d:i:tr" opt; do
-    case $opt in
-      a) AFTER=$OPTARG;;
-      b) BEFORE=$OPTARG;;
-      c) CLASS=$OPTARG;;
-      d) DIMENSION=$OPTARG;;
-      i) INSTANCE=$OPTARG;;
-      t) TERMINAL=true;;
-      r) RESET=true;;
-    esac
-  done
-  shift $((OPTIND -1))
-  WM=$(cat "$FLOATWIN_STATE/000META")
-  CMD="$@"
-  APP=${1:-dropterm}
-  "$RESET" && { rm -rf $FLOATWIN_STATE; echo "cache cleared."; exit 0; }
-  CLASS=${CLASS:-$APP}
-  INSTANCE=${INSTANCE:-$CLASS}
-  WID=$(tail -n 1 "$FLOATWIN_STATE/$APP" 2>/dev/null)
-  [ -n "$BEFORE" ] && ! pgrep "$BEFORE" >/dev/null && eval "$BEFORE &"
-  _toggle_or_create
-  [ -n "$AFTER" ] && ! pgrep "$AFTER" >/dev/null && eval "$AFTER &" || true
-}
+FLOATWIN="$XDG_CACHE_HOME/floatwin"
+TERMINAL=false
+GEO=1920x1080+0+0
+RESET=false
+[[ -d "$FLOATWIN" ]] || mkdir -p $FLOATWIN
+[[ -f "$FLOATWIN/000META" ]] || meta
 
-main "$@"
+while getopts "a:b:c:d:i:tr" opt; do
+  case $opt in
+    a) AFTER=$OPTARG;;
+    b) BEFORE=$OPTARG;;
+    c) CLASS=$OPTARG;;
+    d) GEO=$OPTARG;;
+    i) INSTANCE=$OPTARG;;
+    t) TERMINAL=true;;
+    r) RESET=true;;
+  esac
+done
+shift $((OPTIND -1))
+
+WM=$(cat "$FLOATWIN/000META")
+CMD="$@"
+APP=${1:-dropterm}
+$RESET && { rm -rf $FLOATWIN; echo "cache cleared."; exit 0; }
+CLASS=${CLASS:-$APP}
+INSTANCE=${INSTANCE:-$CLASS}
+WID=$(tail -n 1 "$FLOATWIN/$APP" 2>/dev/null)
+[[ -n "$BEFORE" ]] && ! pgrep "$BEFORE" >/dev/null && eval "$BEFORE &"
+toggle_or_create
+[[ -n "$AFTER" ]] && ! pgrep "$AFTER" >/dev/null && eval "$AFTER &" || true
