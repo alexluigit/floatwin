@@ -24,11 +24,18 @@ _show_window() {
   __wm_show; xdotool windowactivate $WID
 }
 _create_window() {
-  local wid timeout=1000 exceeded=false
   __wm_rule; __parse_dimension
   t_cmd=(alacritty --class $CLASS,$INSTANCE)
   [[ "$APP" == "dropterm" ]] || t_cmd+=("-e ${CMD[@]}")
-  $TERMINAL && eval "${t_cmd[@]} &" || eval "${CMD[@]} &"
+  t_cmd=(`echo ${t_cmd[@]} | sed 's/\"/\\\"/g'`)
+  g_cmd=(`echo ${CMD[@]} | sed 's/\"/\\\"/g'`)
+  $TERMINAL && eval "${t_cmd[@]} &" || eval "${g_cmd[@]} &"
+  intercept
+}
+
+intercept() {
+  local wid timeout=1000 exceeded=false
+  local target=$FLOATWIN/$APP
   counter=0
   while true; do
     new_wid=$(xdo id -d -N $CLASS -n $INSTANCE)
@@ -36,15 +43,16 @@ _create_window() {
     [[ $counter -gt $timeout ]] && { exceeded=true; break; }
     sleep .01; counter=$((counter + 1))
   done
-  $exceeded && notify-send.py -t 1000 "Timeout exceeded." && exit 1;
-  wid=$new_wid w=$W h=$H x=$X y=$Y
+  $exceeded && log "Wait for $CLASS:$INSTANCE timeout." && exit 1;
+  wid=$new_wid
+  w=$(sed -n 1p $target) h=$(sed -n 2p $target)
+  x=$(sed -n 3p $target) y=$(sed -n 4p $target)
   xdotool windowmap $wid windowmove $wid $x $y windowsize $wid $w $h
   echo $wid >> $FLOATWIN/$APP
 }
-
+log() { echo "$@" >> $FLOATWIN/log; }
 meta() {
-  local id=$(xprop -root -notype _NET_SUPPORTING_WM_CHECK | awk '{print $NF}')
-  local wm=$(xprop -notype -id $id _NET_WM_NAME | awk '{print $NF}' | tr -d '"')
+  local wm=$(wmctrl -m | head -1 | sed 's/Name: //')
   echo $wm > $FLOATWIN/000META
 }
 toggle_or_create() {
@@ -58,6 +66,7 @@ FLOATWIN="$XDG_CACHE_HOME/floatwin"
 TERMINAL=false
 GEO=1920x1080+0+0
 RESET=false
+INTERCEPT=false
 [[ -d "$FLOATWIN" ]] || mkdir -p $FLOATWIN
 [[ -f "$FLOATWIN/000META" ]] || meta
 
@@ -65,9 +74,11 @@ while getopts "a:b:c:d:i:tr" opt; do
   case $opt in
     a) AFTER=$OPTARG;;
     b) BEFORE=$OPTARG;;
-    c) CLASS=$OPTARG;;
+    c) CLASS=${OPTARG%:*}; INSTANCE=${OPTARG#*:};;
     d) GEO=$OPTARG;;
-    i) INSTANCE=$OPTARG;;
+    i) INTERCEPT=true
+       CLASS_I=${OPTARG%:*}
+       INSTANCE_I=${OPTARG#*:};;
     t) TERMINAL=true;;
     r) RESET=true;;
   esac
@@ -75,11 +86,11 @@ done
 shift $((OPTIND -1))
 
 WM=$(cat "$FLOATWIN/000META")
-CMD="$@"
+CMD="${@}"
 APP=${1:-dropterm}
 $RESET && { rm -rf $FLOATWIN; echo "cache cleared."; exit 0; }
-CLASS=${CLASS:-$APP}
-INSTANCE=${INSTANCE:-$CLASS}
+$INTERCEPT && { CLASS=$CLASS_I; INSTANCE=$INSTANCE_I; intercept; exit 0; }
+CLASS=${CLASS:-$APP}; INSTANCE=${INSTANCE:-$CLASS}
 WID=$(tail -n 1 "$FLOATWIN/$APP" 2>/dev/null)
 [[ -n "$BEFORE" ]] && ! pgrep "$BEFORE" >/dev/null && eval "$BEFORE &"
 toggle_or_create
