@@ -30,10 +30,9 @@ _create_window() {
   t_cmd=(`echo ${t_cmd[@]} | sed 's/\"/\\\"/g'`)
   g_cmd=(`echo ${CMD[@]} | sed 's/\"/\\\"/g'`)
   $TERMINAL && eval "${t_cmd[@]} &" || eval "${g_cmd[@]} &"
-  intercept
+  _intercept
 }
-
-intercept() {
+_intercept() {
   local wid timeout=1000 exceeded=false
   local target=$FLOATWIN/$APP
   counter=0
@@ -50,6 +49,7 @@ intercept() {
   xdotool windowmap $wid windowmove $wid $x $y windowsize $wid $w $h
   echo $wid >> $FLOATWIN/$APP
 }
+
 log() { echo "$@" >> $FLOATWIN/log; }
 meta() {
   local wm=$(wmctrl -m | head -1 | sed 's/Name: //')
@@ -77,8 +77,8 @@ while getopts "a:b:c:d:i:tr" opt; do
     c) CLASS=${OPTARG%:*}; INSTANCE=${OPTARG#*:};;
     d) GEO=$OPTARG;;
     i) INTERCEPT=true
-       CLASS_I=${OPTARG%:*}
-       INSTANCE_I=${OPTARG#*:};;
+       CLASS=${OPTARG%:*}
+       INSTANCE=${OPTARG#*:};;
     t) TERMINAL=true;;
     r) RESET=true;;
   esac
@@ -89,7 +89,7 @@ WM=$(cat "$FLOATWIN/000META")
 CMD="${@}"
 APP=${1:-dropterm}
 $RESET && { rm -rf $FLOATWIN; echo "cache cleared."; exit 0; }
-$INTERCEPT && { CLASS=$CLASS_I; INSTANCE=$INSTANCE_I; intercept; exit 0; }
+$INTERCEPT && { __wm_rule; _intercept; exit 0; }
 CLASS=${CLASS:-$APP}; INSTANCE=${INSTANCE:-$CLASS}
 WID=$(tail -n 1 "$FLOATWIN/$APP" 2>/dev/null)
 [[ -n "$BEFORE" ]] && ! pgrep "$BEFORE" >/dev/null && eval "$BEFORE &"
