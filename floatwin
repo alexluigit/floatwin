@@ -1,31 +1,44 @@
 #!/bin/sh
-__wm_rule() { [[ $WM == "bspwm" ]] && bspc rule -a $CLASS:$INSTANCE -o state=floating; }
-__wm_hide() { wmctrl -b add,hidden -ir $WID; }
-__wm_show() { wmctrl -b remove,hidden -ir $WID; }
+__pre_map() {
+  [[ -n "$BEFORE" ]] && ! pgrep "$BEFORE" >/dev/null && eval "$BEFORE &"
+  [[ $WM == "bspwm" ]] && bspc rule -a $CLASS:$INSTANCE -o state=floating;
+}
+__post_map() {
+  [[ $WM == "awesome" ]] && echo 'require("awful").client.floating.set(c, true)' | awesome-client
+  [[ -n "$AFTER" ]] && ! pgrep "$AFTER" >/dev/null && eval "$AFTER &"
+}
 __parse_dimension() {
-  W=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $FLOATWIN/$APP)
-  H=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $FLOATWIN/$APP)
-  X=$(awk -F+ '{print $2}' <<< $GEO | tee -a $FLOATWIN/$APP)
-  Y=$(awk -F+ '{print $3}' <<< $GEO | tee -a $FLOATWIN/$APP)
+  W=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $APP_CACHE)
+  H=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $APP_CACHE)
+  X=$(awk -F+ '{print $2}' <<< $GEO | tee -a $APP_CACHE)
+  Y=$(awk -F+ '{print $3}' <<< $GEO | tee -a $APP_CACHE)
 }
 
 _win_visible() {
-  test -z $(xprop -id $WID | grep "_NET_WM_STATE(ATOM)" | awk -F= '{print $2}') && \
-  test $(xdotool get_desktop) -eq $(xdotool get_desktop_for_window $WID)
+  [[ $(xwininfo -id "$WID" 2> /dev/null | gawk '/Map State/ {print $3}') == IsViewable ]]
 }
 _wid_expired() {
   curr_instance=$(xprop -id $WID 2>/dev/null | grep "WM_CLASS(STRING)" \
   | awk '{print $3}' | tr -d ',"')
   [[ "$curr_instance" != "$INSTANCE" ]]
 }
-_hide_window () { __wm_hide; }
+_hide_window () {
+  [[ $WM == "awesome" ]] && {
+    xdotool windowactivate $WID
+    echo 'local c = client.focus; if c then c.minimized = true end' | awesome-client
+  } || xdotool windowunmap $WID; }
 _show_window() {
-  xdotool set_desktop_for_window "$WID" "$(xdotool get_desktop)"
-  __wm_show; xdotool windowactivate $WID
+  __pre_map
+  xdotool set_desktop_for_window "${1:-$WID}" "$(xdotool get_desktop)"
+  w=$(sed -n 1p $APP_CACHE) h=$(sed -n 2p $APP_CACHE)
+  x=$(sed -n 3p $APP_CACHE) y=$(sed -n 4p $APP_CACHE)
+  xdotool windowmap ${1:-$WID} windowactivate ${1:-$WID}
+  __post_map
+  xdotool windowmove ${1:-$WID} $x $y windowsize ${1:-$WID} $w $h
 }
 _create_window() {
-  __wm_rule; __parse_dimension
-  t_cmd=(alacritty --class $CLASS,$INSTANCE)
+  __parse_dimension
+  t_cmd=(alacritty --class $INSTANCE,$CLASS)
   [[ "$APP" == "dropterm" ]] || t_cmd+=("-e ${CMD[@]}")
   t_cmd=(`echo ${t_cmd[@]} | sed 's/\"/\\\"/g'`)
   g_cmd=(`echo ${CMD[@]} | sed 's/\"/\\\"/g'`)
@@ -34,25 +47,23 @@ _create_window() {
 }
 _intercept() {
   local wid timeout=1000 exceeded=false
-  local target=$FLOATWIN/$APP
   counter=0
   while true; do
-    new_wid=$(xdo id -d -N $CLASS -n $INSTANCE)
+    new_wid=$(xdo id -d -N $CLASS -n ${INTERCEPT_FROM:-$INSTANCE})
     [[ -n $new_wid ]] && break
     [[ $counter -gt $timeout ]] && { exceeded=true; break; }
     sleep .01; counter=$((counter + 1))
   done
-  $exceeded && log "Wait for $CLASS:$INSTANCE timeout." && exit 1;
-  wid=$new_wid
-  w=$(sed -n 1p $target) h=$(sed -n 2p $target)
-  x=$(sed -n 3p $target) y=$(sed -n 4p $target)
-  xdotool windowmap $wid windowmove $wid $x $y windowsize $wid $w $h
-  echo $wid >> $FLOATWIN/$APP
+  $exceeded && log "Wait for $CLASS:${INTERCEPT_FROM:-$INSTANCE} timeout." && exit 1;
+  wid=$new_wid; [[ -n $INTERCEPT_FROM ]] && xdotool set_window --classname $INSTANCE $wid
+  _show_window $wid
+  echo $wid >> $APP_CACHE
 }
 
 log() { echo "$@" >> $FLOATWIN/log; }
 meta() {
-  local wm=$(wmctrl -m | head -1 | sed 's/Name: //')
+  local id=$(xprop -root -notype _NET_SUPPORTING_WM_CHECK); id=${id##* }
+  wm=$(xprop -notype -id "$id" _NET_WM_NAME | head -n 1); wm=${wm##* }; wm=${wm//\"/}
   echo $wm > $FLOATWIN/000META
 }
 toggle_or_create() {
@@ -70,15 +81,15 @@ INTERCEPT=false
 [[ -d "$FLOATWIN" ]] || mkdir -p $FLOATWIN
 [[ -f "$FLOATWIN/000META" ]] || meta
 
-while getopts "a:b:c:d:i:tr" opt; do
+while getopts "a:b:c:d:f:i:n:tr" opt; do
   case $opt in
     a) AFTER=$OPTARG;;
     b) BEFORE=$OPTARG;;
     c) CLASS=${OPTARG%:*}; INSTANCE=${OPTARG#*:};;
     d) GEO=$OPTARG;;
-    i) INTERCEPT=true
-       CLASS=${OPTARG%:*}
-       INSTANCE=${OPTARG#*:};;
+    f) INTERCEPT_FROM=$OPTARG;;
+    i) INTERCEPT=true; CLASS=${OPTARG%:*}; INSTANCE=${OPTARG#*:};;
+    n) NAME=$OPTARG;;
     t) TERMINAL=true;;
     r) RESET=true;;
   esac
@@ -89,9 +100,9 @@ WM=$(cat "$FLOATWIN/000META")
 CMD="${@}"
 APP=${1:-dropterm}
 $RESET && { rm -rf $FLOATWIN; echo "cache cleared."; exit 0; }
-$INTERCEPT && { __wm_rule; _intercept; exit 0; }
 CLASS=${CLASS:-$APP}; INSTANCE=${INSTANCE:-$CLASS}
-WID=$(tail -n 1 "$FLOATWIN/$APP" 2>/dev/null)
-[[ -n "$BEFORE" ]] && ! pgrep "$BEFORE" >/dev/null && eval "$BEFORE &"
+[[ -n $NAME ]] && INSTANCE=$INSTANCE.$NAME
+APP_CACHE=$FLOATWIN/$APP.${NAME:-0}
+$INTERCEPT && { _intercept; exit 0; }
+WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
 toggle_or_create
-[[ -n "$AFTER" ]] && ! pgrep "$AFTER" >/dev/null && eval "$AFTER &" || true
