@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 __pre_map() {
   [[ -n "$BEFORE" ]] && eval "$BEFORE"
   [[ $WM == "bspwm" ]] && bspc rule -a $CLASS:$INSTANCE -o state=floating;
@@ -15,28 +15,23 @@ __parse_dimension() {
   Y=$(awk -F+ '{print $3}' <<< $GEO | tee -a $APP_CACHE)
 }
 
-_win_visible() {
-  [[ $(xwininfo -id "$WID" 2> /dev/null | gawk '/Map State/ {print $3}') == IsViewable ]]
-}
+_win_visible() { [[ $(xwininfo -id "$WID" 2> /dev/null | gawk '/Map State/ {print $3}') == IsViewable ]]; }
 _wid_expired() {
-  xwininfo -id $WID 2>/dev/null | grep $NAME 2>/dev/null && return 1;
-  curr_instance=$(xprop -id $WID 2>/dev/null | grep "WM_CLASS(STRING)" \
-  | awk '{print $3}' | tr -d ',"')
-  [[ "$curr_instance" != "$INSTANCE" ]]
+  wid_name=$(xprop -id $WID 2>/dev/null | grep "^WM_NAME(.*)" 2>/dev/null | awk '{print $3}' | tr -d ',"')
+  [[ -z $wid_name ]] && return 0; [[ "$wid_name" = "$NAME" ]] && return 1
+  wid_class=$(xprop -id $WID 2>/dev/null | grep "WM_CLASS(STRING)" 2>/dev/null | awk '{print $NF}' | tr -d ',"')
+  wid_instance=$(xprop -id $WID 2>/dev/null | grep "WM_CLASS(STRING)" 2>/dev/null | awk '{print $3}' | tr -d ',"')
+  [[ "$wid_class" = "$CLASS" ]] && [[ -z $INSTANCE ]] && return 1
+  [[ "$wid_instance" = "$INSTANCE" ]] && return 1
 }
-_hide_window () {
-  [[ $WM == "awesome" ]] && {
-    xdotool windowactivate $WID
-    echo 'local c = client.focus; if c then c.minimized = true end' | awesome-client
-  } || xdotool windowunmap $WID; }
+_hide_window () { xdotool windowunmap $WID; }
 _show_window() {
-  # $INTERCEPT && __pre_map
+  __pre_map
   xdotool set_desktop_for_window "${1:-$WID}" "$(xdotool get_desktop)"
   w=$(sed -n 1p $APP_CACHE) h=$(sed -n 2p $APP_CACHE)
   x=$(sed -n 3p $APP_CACHE) y=$(sed -n 4p $APP_CACHE)
-  xdotool windowmap ${1:-$WID} windowactivate ${1:-$WID}
-  xdotool windowmove ${1:-$WID} $x $y windowsize ${1:-$WID} $w $h
-  # $INTERCEPT && __post_map
+  xdotool windowmap ${1:-$WID} windowmove ${1:-$WID} $x $y windowsize ${1:-$WID} $w $h
+  __post_map
 }
 _create_window() {
   __parse_dimension
@@ -44,15 +39,15 @@ _create_window() {
   [[ "$APP" == "dropterm" ]] || t_cmd+=("-e ${CMD[@]}")
   t_cmd=(`echo ${t_cmd[@]} | sed 's/\"/\\\"/g'`)
   g_cmd=(`echo ${CMD[@]} | sed 's/\"/\\\"/g'`)
+  _intercept &
   $TERMINAL && eval "${t_cmd[@]} &" || eval "${g_cmd[@]} &"
-  _intercept
 }
 _intercept() {
   __pre_map
   local wid timeout=1000 exceeded=false
   counter=0
   while true; do
-    new_wid=$(eval $SEARCH_CMD)
+    new_wid=$(eval ${SEARCH_CMD[@]})
     [[ -n $new_wid ]] && break
     [[ $counter -gt $timeout ]] && { exceeded=true; break; }
     sleep .01; counter=$((counter + 1))
@@ -61,7 +56,6 @@ _intercept() {
   wid=$new_wid; [[ -n $INTERCEPT_FROM ]] && xdotool set_window --classname $INSTANCE $wid
   _show_window $wid
   echo $wid >> $APP_CACHE
-  __post_map
 }
 
 log() { echo "$@" >> $FLOATWIN/log; }
@@ -106,16 +100,17 @@ WM=$(cat "$FLOATWIN/000META")
 CMD="${@}"; [[ -z $CMD ]] && CMD="echo"
 APP=${1:-dropterm}
 $RESET && { rm -rf $FLOATWIN; echo "cache cleared."; exit 0; }
-CLASS=${CLASS:-$APP}; INSTANCE=${INSTANCE:-$CLASS}
+$TERMINAL && { CLASS=${CLASS:-$APP}; INSTANCE=${INSTANCE:-$CLASS}; }
 [[ -n $INDEX ]] && INSTANCE=$INSTANCE.$INDEX
-SEARCH_CMD="xdo id -d -N $CLASS -n ${INTERCEPT_FROM:-$INSTANCE}"
-A_RULES="{class={\"$CLASS\"},instance={\"$INSTANCE\"}}"
-[[ -n $NAME ]] && { SEARCH_CMD="xdo id -d -a $NAME"; A_RULES="{name={\"$NAME\"}}"; }
+SEARCH_CMD=(xdo id -d)
+[[ -n $CLASS ]] && { SEARCH_CMD+=("-N $CLASS"); rule_class="class={\"$CLASS\"},"; }
+[[ -n $INSTANCE ]] && { SEARCH_CMD+=("-n $INSTANCE"); rule_instance="instance={\"$INSTANCE\"},"; }
+[[ -n $NAME ]] && { SEARCH_CMD+=("-a $NAME"); rule_name="name={\"$NAME\"},"; }
 AWESOME_APPEND="require('ruled').client.append_rule{id='floatwin',
-rule_any=$A_RULES,properties={floating=true}}"
+rule_any={$rule_class$rule_instance$rule_name},properties={floating=true}}"
 AWESOME_REMOVE="require('ruled').client.remove_rule('floatwin')"
-
 APP_CACHE=$FLOATWIN/$APP.${INDEX:-0}
 $INTERCEPT && { _intercept; exit 0; }
 WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
+# echo ${SEARCH_CMD[@]}
 toggle_or_create
