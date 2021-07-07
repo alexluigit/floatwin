@@ -112,5 +112,4 @@ AWESOME_REMOVE="require('ruled').client.remove_rule('floatwin')"
 APP_CACHE=$FLOATWIN/$APP.${INDEX:-0}
 $INTERCEPT && { _intercept; exit 0; }
 WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
-# echo ${SEARCH_CMD[@]}
 toggle_or_create
