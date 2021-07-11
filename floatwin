@@ -52,14 +52,13 @@ _intercept() {
     [[ $counter -gt $timeout ]] && { exceeded=true; break; }
     sleep .01; counter=$((counter + 1))
   done
-  $exceeded && log "Wait for $CLASS:${INTERCEPT_FROM:-$INSTANCE} timeout." && exit 1;
+  $exceeded && _log "Wait for $CLASS:${INTERCEPT_FROM:-$INSTANCE} timeout." && exit 1;
   wid=$new_wid; [[ -n $INTERCEPT_FROM ]] && xdotool set_window --classname $INSTANCE $wid
   _show_window $wid
   echo $wid >> $APP_CACHE
 }
-
-log() { echo "$@" >> $FLOATWIN/log; }
-meta() {
+_log() { echo "$@" >> $FLOATWIN/log; }
+_meta() {
   local id=$(xprop -root -notype _NET_SUPPORTING_WM_CHECK); id=${id##* }
   wm=$(xprop -notype -id "$id" _NET_WM_NAME | head -n 1); wm=${wm##* }; wm=${wm//\"/}
   echo $wm > $FLOATWIN/000META
@@ -78,7 +77,7 @@ RESET=false
 INTERCEPT=false
 
 [[ -d "$FLOATWIN" ]] || mkdir -p $FLOATWIN
-[[ -f "$FLOATWIN/000META" ]] || meta
+[[ -f "$FLOATWIN/000META" ]] || _meta
 
 while getopts "a:b:c:d:f:i:I:n:tr" opt; do
   case $opt in
