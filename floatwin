@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 __pre_map() {
-  [[ -n "$BEFORE" ]] && eval "$BEFORE"
+  [[ -n "$BEFORE_MAP" ]] && eval "$BEFORE_MAP"
   [[ $WM == "bspwm" ]] && bspc rule -a $CLASS:$INSTANCE -o state=floating;
   [[ $WM == "awesome" ]] && awesome-client "$AWESOME_APPEND"
 }
 __post_map() {
   [[ $WM == "awesome" ]] && awesome-client "$AWESOME_REMOVE"
-  [[ -n "$AFTER" ]] && eval "$AFTER"
+  [[ -n "$AFTER_MAP" ]] && eval "$AFTER_MAP"
 }
+__pre_create() { [[ -n "$BEFORE_CREATE" ]] && eval "$BEFORE_CREATE"; __pre_map; }
+__post_create() { [[ -n "$AFTER_CREATE" ]] && eval "$AFTER_CREATE"; }
 __parse_dimension() {
   W=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $APP_CACHE)
   H=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $APP_CACHE)
@@ -19,7 +21,8 @@ _win_visible() { [[ $(xwininfo -id "$WID" 2> /dev/null | gawk '/Map State/ {prin
 _win_is_current() { [[ $(xdo id) == $WID ]]; }
 _wid_expired() {
   wid_name=$(xprop -id $WID 2>/dev/null | grep "^WM_NAME(.*)" 2>/dev/null | awk '{print $3}' | tr -d ',"')
-  [[ -z $wid_name ]] && return 0; [[ "$wid_name" = "$NAME" ]] && return 1
+  [[ -z $wid_name ]] && return 0
+  [[ "$wid_name" = "$NAME" ]] && return 1
   wid_class=$(xprop -id $WID 2>/dev/null | grep "WM_CLASS(STRING)" 2>/dev/null | awk '{print $NF}' | tr -d ',"')
   wid_instance=$(xprop -id $WID 2>/dev/null | grep "WM_CLASS(STRING)" 2>/dev/null | awk '{print $3}' | tr -d ',"')
   [[ "$wid_class" = "$CLASS" ]] && [[ -z $INSTANCE ]] && return 1
@@ -36,6 +39,7 @@ _show_window() {
   __post_map
 }
 _create_window() {
+  __pre_create
   __parse_dimension
   t_cmd=(alacritty --class $INSTANCE,$CLASS)
   [[ "$APP" == "dropterm" ]] || t_cmd+=("-e ${CMD[@]}")
@@ -43,9 +47,9 @@ _create_window() {
   g_cmd=(`echo ${CMD[@]} | sed 's/\"/\\\"/g'`)
   _intercept &
   $TERMINAL && eval "${t_cmd[@]} &" || eval "${g_cmd[@]} &"
+  __post_create
 }
 _intercept() {
-  __pre_map
   local wid timeout=1000 exceeded=false
   counter=0
   while true; do
@@ -70,7 +74,8 @@ toggle_or_create() {
   if _wid_expired; then _create_window
   elif _win_visible; then
     _win_is_current && _hide_window || _pop_window
-  else _show_window
+  else
+    _show_window
   fi
 }
 
@@ -83,12 +88,14 @@ INTERCEPT=false
 [[ -d "$FLOATWIN" ]] || mkdir -p $FLOATWIN
 [[ -f "$FLOATWIN/000META" ]] || _meta
 
-while getopts "a:b:c:d:f:i:I:n:tr" opt; do
+while getopts "a:A:b:B:c:f:g:i:I:n:tr" opt; do
   case $opt in
-    a) AFTER=$OPTARG;;
-    b) BEFORE=$OPTARG;;
+    a) AFTER_MAP=$OPTARG;;
+    b) BEFORE_MAP=$OPTARG;;
+    A) AFTER_CREATE=$OPTARG;;
+    B) BEFORE_CREATE=$OPTARG;;
     c) CLASS=${OPTARG%:*}; INSTANCE=${OPTARG#*:};;
-    d) GEO=$OPTARG;;
+    g) GEO=$OPTARG;;
     f) INTERCEPT_FROM=$OPTARG;;
     i) INDEX=$OPTARG;;
     I) INTERCEPT=true; CLASS=${OPTARG%:*}; INSTANCE=${OPTARG#*:};;
@@ -115,4 +122,5 @@ AWESOME_REMOVE="require('ruled').client.remove_rule('floatwin')"
 APP_CACHE=$FLOATWIN/$APP.${INDEX:-0}
 $INTERCEPT && { _intercept; exit 0; }
 WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
+
 toggle_or_create
