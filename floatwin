@@ -16,6 +16,7 @@ __parse_dimension() {
 }
 
 _win_visible() { [[ $(xwininfo -id "$WID" 2> /dev/null | gawk '/Map State/ {print $3}') == IsViewable ]]; }
+_win_is_current() { [[ $(xdo id) == $WID ]]; }
 _wid_expired() {
   wid_name=$(xprop -id $WID 2>/dev/null | grep "^WM_NAME(.*)" 2>/dev/null | awk '{print $3}' | tr -d ',"')
   [[ -z $wid_name ]] && return 0; [[ "$wid_name" = "$NAME" ]] && return 1
@@ -25,6 +26,7 @@ _wid_expired() {
   [[ "$wid_instance" = "$INSTANCE" ]] && return 1
 }
 _hide_window () { xdotool windowunmap $WID; }
+_pop_window () { xdotool windowactivate $WID; }
 _show_window() {
   __pre_map
   xdotool set_desktop_for_window "${1:-$WID}" "$(xdotool get_desktop)"
@@ -63,9 +65,11 @@ _meta() {
   wm=$(xprop -notype -id "$id" _NET_WM_NAME | head -n 1); wm=${wm##* }; wm=${wm//\"/}
   echo $wm > $FLOATWIN/000META
 }
+
 toggle_or_create() {
   if _wid_expired; then _create_window
-  elif _win_visible; then _hide_window
+  elif _win_visible; then
+    _win_is_current && _hide_window || _pop_window
   else _show_window
   fi
 }
