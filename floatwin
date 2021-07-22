@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 __pre_map() {
+  "$TILING" && return
   [[ -n "$BEFORE_MAP" ]] && eval "$BEFORE_MAP"
   [[ $WM == "bspwm" ]] && bspc rule -a $CLASS:$INSTANCE -o state=floating;
   [[ $WM == "awesome" ]] && awesome-client "$AWESOME_APPEND"
@@ -84,11 +85,12 @@ TERMINAL=false
 GEO=1920x1080+50+50
 RESET=false
 INTERCEPT=false
+TILING=false
 
 [[ -d "$FLOATWIN" ]] || mkdir -p $FLOATWIN
 [[ -f "$FLOATWIN/000META" ]] || _meta
 
-while getopts "a:A:b:B:c:f:g:i:I:n:tr" opt; do
+while getopts "a:A:b:B:c:f:g:i:I:n:tTr" opt; do
   case $opt in
     a) AFTER_MAP=$OPTARG;;
     b) BEFORE_MAP=$OPTARG;;
@@ -100,6 +102,7 @@ while getopts "a:A:b:B:c:f:g:i:I:n:tr" opt; do
     i) INDEX=$OPTARG;;
     I) INTERCEPT=true; CLASS=${OPTARG%:*}; INSTANCE=${OPTARG#*:};;
     n) NAME=$OPTARG;;
+    T) TILING=true;;
     t) TERMINAL=true;;
     r) RESET=true;;
   esac
