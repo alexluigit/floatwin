@@ -12,10 +12,10 @@ __post_map() {
 __pre_create() { [[ -n "$BEFORE_CREATE" ]] && eval "$BEFORE_CREATE"; __pre_map; }
 __post_create() { [[ -n "$AFTER_CREATE" ]] && eval "$AFTER_CREATE"; }
 __parse_dimension() {
-  W=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $APP_CACHE)
-  H=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $APP_CACHE)
-  X=$(awk -F+ '{print $2}' <<< $GEO | tee -a $APP_CACHE)
-  Y=$(awk -F+ '{print $3}' <<< $GEO | tee -a $APP_CACHE)
+  awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $APP_CACHE
+  awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $APP_CACHE
+  awk -F+ '{print $2}' <<< $GEO | tee -a $APP_CACHE
+  awk -F+ '{print $3}' <<< $GEO | tee -a $APP_CACHE
 }
 
 _win_visible() { [[ $(xwininfo -id "$WID" 2> /dev/null | gawk '/Map State/ {print $3}') == IsViewable ]]; }
