@@ -1,21 +1,34 @@
 #!/usr/bin/env bash
-__pre_map() {
-  "$TILING" && return
-  [[ -n "$BEFORE_MAP" ]] && eval "$BEFORE_MAP"
-  [[ $WM == "bspwm" ]] && bspc rule -a $CLASS:$INSTANCE -o state=floating;
-  [[ $WM == "awesome" ]] && awesome-client "$AWESOME_APPEND"
+__add_float_rule() {
+  case $WM in
+    bspwm) bspc rule -a $CLASS:$INSTANCE -o state=floating;;
+    awesome)
+      [[ -n $CLASS ]] && local c="class={\"$CLASS\"},"
+      [[ -n $INSTANCE ]] && local i="instance={\"$INSTANCE\"},"
+      [[ -n $NAME ]] && local n="name={\"$NAME\"},"
+      local rule_aw="require('ruled').client.append_rule{id='fw',rule_any={$c$i$n},properties={floating=true}}"
+      awesome-client "$rule_aw";;
+  esac
 }
-__post_map() {
-  [[ $WM == "awesome" ]] && awesome-client "$AWESOME_REMOVE"
-  [[ -n "$AFTER_MAP" ]] && eval "$AFTER_MAP"
-}
-__pre_create() { [[ -n "$BEFORE_CREATE" ]] && eval "$BEFORE_CREATE"; __pre_map; }
+__remove_float_rule() { [[ $WM == "awesome" ]] && awesome-client "require('ruled').client.remove_rule('fw')"; }
+__pre_map() { [[ -n "$BEFORE_MAP" ]] && eval "$BEFORE_MAP"; }
+__post_map() { [[ -n "$AFTER_MAP" ]] && eval "$AFTER_MAP"; }
+__pre_create() { [[ -n "$BEFORE_CREATE" ]] && eval "$BEFORE_CREATE"; }
 __post_create() { [[ -n "$AFTER_CREATE" ]] && eval "$AFTER_CREATE"; }
 __parse_dimension() {
-  awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $APP_CACHE
-  awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $APP_CACHE
-  awk -F+ '{print $2}' <<< $GEO | tee -a $APP_CACHE
-  awk -F+ '{print $3}' <<< $GEO | tee -a $APP_CACHE
+  local _w=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $APP_CACHE)
+  local _h=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $APP_CACHE)
+  local _x=$(awk -F+ '{print $2}' <<< $GEO | tee -a $APP_CACHE)
+  local _y=$(awk -F+ '{print $3}' <<< $GEO | tee -a $APP_CACHE)
+  "$TILING" && echo "tiling" >> $APP_CACHE || echo "floating" >> $APP_CACHE
+}
+__save_floating() {
+  local state=floating
+  case $WM in
+    awesome) [[ -n $(awesome-client "return client.focus.floating" | grep false) ]] && state=tiling;;
+    bspwm) [[ -n $(bspc query -T -n | grep '"state":"floating"') ]] || state=tiling;;
+  esac
+  sed -i "5s/.*/$state/" $APP_CACHE
 }
 
 _win_visible() { [[ $(xwininfo -id "$WID" 2> /dev/null | gawk '/Map State/ {print $3}') == IsViewable ]]; }
@@ -29,15 +42,22 @@ _wid_expired() {
   [[ "$wid_class" = "$CLASS" ]] && [[ -z $INSTANCE ]] && return 1
   [[ "$wid_instance" = "$INSTANCE" ]] && return 1
 }
-_hide_window () { xdotool windowunmap $WID; }
 _pop_window () { xdotool windowactivate $WID; }
+_hide_window () { __save_floating; xdotool windowunmap $WID; }
 _show_window() {
+  local state=$(sed -n 5p $APP_CACHE)
   __pre_map
   xdotool set_desktop_for_window "${1:-$WID}" "$(xdotool get_desktop)"
-  w=$(sed -n 1p $APP_CACHE) h=$(sed -n 2p $APP_CACHE)
-  x=$(sed -n 3p $APP_CACHE) y=$(sed -n 4p $APP_CACHE)
-  xdotool windowmap ${1:-$WID} windowmove ${1:-$WID} $x $y windowsize ${1:-$WID} $w $h
+  if [[ $state == "tiling" ]]; then
+    xdotool windowmap ${1:-$WID}
+  else
+    w=$(sed -n 1p $APP_CACHE) h=$(sed -n 2p $APP_CACHE)
+    x=$(sed -n 3p $APP_CACHE) y=$(sed -n 4p $APP_CACHE)
+    [[ $state == "floating" ]] && __add_float_rule
+    xdotool windowmap ${1:-$WID} windowmove ${1:-$WID} $x $y windowsize ${1:-$WID} $w $h
+  fi
   __post_map
+  __remove_float_rule
 }
 _create_window() {
   __pre_create
@@ -47,14 +67,19 @@ _create_window() {
   t_cmd=(`echo ${t_cmd[@]} | sed 's/\"/\\\"/g'`)
   g_cmd=(`echo ${CMD[@]} | sed 's/\"/\\\"/g'`)
   _intercept &
+  $TILING || __add_float_rule
   $TERMINAL && eval "${t_cmd[@]} &" || eval "${g_cmd[@]} &"
   __post_create
 }
 _intercept() {
   local wid timeout=1000 exceeded=false
+  local search=(xdo id -d)
+  [[ -n $CLASS ]] && search+=("-N $CLASS")
+  [[ -n $INSTANCE ]] && search+=("-n $INSTANCE")
+  [[ -n $NAME ]] && search+=("-a $NAME")
   counter=0
   while true; do
-    new_wid=$(eval ${SEARCH_CMD[@]})
+    new_wid=$(eval ${search[@]})
     [[ -n $new_wid ]] && break
     [[ $counter -gt $timeout ]] && { exceeded=true; break; }
     sleep .01; counter=$((counter + 1))
@@ -115,13 +140,6 @@ APP=${1:-dropterm}
 $RESET && { rm -rf $FLOATWIN; echo "cache cleared."; exit 0; }
 $TERMINAL && { CLASS=${CLASS:-$APP}; INSTANCE=${INSTANCE:-$CLASS}; }
 [[ -n $INDEX ]] && INSTANCE=$INSTANCE.$INDEX
-SEARCH_CMD=(xdo id -d)
-[[ -n $CLASS ]] && { SEARCH_CMD+=("-N $CLASS"); rule_class="class={\"$CLASS\"},"; }
-[[ -n $INSTANCE ]] && { SEARCH_CMD+=("-n $INSTANCE"); rule_instance="instance={\"$INSTANCE\"},"; }
-[[ -n $NAME ]] && { SEARCH_CMD+=("-a $NAME"); rule_name="name={\"$NAME\"},"; }
-AWESOME_APPEND="require('ruled').client.append_rule{id='floatwin',
-rule_any={$rule_class$rule_instance$rule_name},properties={floating=true}}"
-AWESOME_REMOVE="require('ruled').client.remove_rule('floatwin')"
 APP_CACHE=$FLOATWIN/$APP.${INDEX:-0}
 $INTERCEPT && { _intercept; exit 0; }
 WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
