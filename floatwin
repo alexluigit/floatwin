@@ -11,10 +11,7 @@ __add_float_rule() {
   esac
 }
 __remove_float_rule() { [[ $WM == "awesome" ]] && awesome-client "require('ruled').client.remove_rule('fw')"; }
-__pre_map() { [[ -n "$BEFORE_MAP" ]] && eval "$BEFORE_MAP"; }
-__post_map() { [[ -n "$AFTER_MAP" ]] && eval "$AFTER_MAP"; }
-__pre_create() { [[ -n "$BEFORE_CREATE" ]] && eval "$BEFORE_CREATE"; }
-__post_create() { [[ -n "$AFTER_CREATE" ]] && eval "$AFTER_CREATE"; }
+__run_hook() { [[ -n "$1" ]] && eval "$1"; }
 __parse_dimension() {
   local _w=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $APP_CACHE)
   local _h=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $APP_CACHE)
@@ -46,7 +43,7 @@ _pop_window () { xdotool windowactivate $WID; }
 _hide_window () { __save_floating; xdotool windowunmap $WID; }
 _show_window() {
   local state=$(sed -n 5p $APP_CACHE)
-  __pre_map
+  __run_hook $BEFORE_MAP
   xdotool set_desktop_for_window "${1:-$WID}" "$(xdotool get_desktop)"
   if [[ $state == "tiling" ]]; then
     xdotool windowmap ${1:-$WID}
@@ -56,11 +53,11 @@ _show_window() {
     [[ $state == "floating" ]] && __add_float_rule
     xdotool windowmap ${1:-$WID} windowmove ${1:-$WID} $x $y windowsize ${1:-$WID} $w $h
   fi
-  __post_map
+  __run_hook $AFTERMAP
   __remove_float_rule
 }
 _create_window() {
-  __pre_create
+  __run_hook $BEFORE_CREATE
   __parse_dimension
   t_cmd=(alacritty --class $INSTANCE,$CLASS)
   [[ "$APP" == "dropterm" ]] || t_cmd+=("-e ${CMD[@]}")
@@ -69,7 +66,7 @@ _create_window() {
   _intercept &
   $TILING || __add_float_rule
   $TERMINAL && eval "${t_cmd[@]} &" || eval "${g_cmd[@]} &"
-  __post_create
+  __run_hook $AFTER_CREATE
 }
 _intercept() {
   local wid timeout=1000 exceeded=false
