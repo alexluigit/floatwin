@@ -12,6 +12,12 @@ __add_float_rule() {
 }
 __remove_float_rule() { [[ $WM == "awesome" ]] && awesome-client "require('ruled').client.remove_rule('fw')"; }
 __run_hook() { [[ -n "$1" ]] && eval "$1"; }
+__config_get () {
+  awk -v section="$1" -v variable="$2" '
+  $0 == "[" section "]" { in_section = 1; next }
+  in_section && $1 == variable { $1=""; $2=""; sub(/^[[:space:]]+/, ""); print; exit; }
+  in_section && $1 == "" { exit 1; }' $CONFIG
+}
 __parse_dimension() {
   local _w=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $1}' | tee $APP_CACHE)
   local _h=$(awk -F+ '{print $1}' <<< $GEO | awk -Fx '{print $2}' | tee -a $APP_CACHE)
@@ -58,6 +64,8 @@ _show_window() {
 }
 _create_window() {
   __run_hook $BEFORE_CREATE
+  [[ -z $GEO ]] && GEO=$(__config_get Geo $APP)
+  [[ -z $GEO ]] && GEO=$DEFAULT_GEO
   __parse_dimension
   t_cmd=(alacritty --class $INSTANCE,$CLASS)
   [[ "$APP" == "dropterm" ]] || t_cmd+=("-e ${CMD[@]}")
@@ -86,11 +94,11 @@ _intercept() {
   _show_window $wid
   echo $wid >> $APP_CACHE
 }
-_log() { echo "$@" >> $FLOATWIN/log; }
+_log() { echo "$@" >> $CACHE/log; }
 _meta() {
   local id=$(xprop -root -notype _NET_SUPPORTING_WM_CHECK); id=${id##* }
   wm=$(xprop -notype -id "$id" _NET_WM_NAME | head -n 1); wm=${wm##* }; wm=${wm//\"/}
-  echo $wm > $FLOATWIN/000META
+  echo $wm > $CACHE/000META
 }
 
 toggle_or_create() {
@@ -102,15 +110,16 @@ toggle_or_create() {
   fi
 }
 
-FLOATWIN="$XDG_CACHE_HOME/floatwin"
+CONFIG="$XDG_CONFIG_HOME/floatwin.conf"
+CACHE="$XDG_CACHE_HOME/floatwin"
+DEFAULT_GEO=1920x1080+50+50
 TERMINAL=false
-GEO=1920x1080+50+50
 RESET=false
 INTERCEPT=false
 TILING=false
 
-[[ -d "$FLOATWIN" ]] || mkdir -p $FLOATWIN
-[[ -f "$FLOATWIN/000META" ]] || _meta
+[[ -d "$CACHE" ]] || mkdir -p $CACHE
+[[ -f "$CACHE/000META" ]] || _meta
 
 while getopts "a:A:b:B:c:f:g:i:I:n:tTr" opt; do
   case $opt in
@@ -131,13 +140,13 @@ while getopts "a:A:b:B:c:f:g:i:I:n:tTr" opt; do
 done
 shift $((OPTIND -1))
 
-WM=$(cat "$FLOATWIN/000META")
+WM=$(cat "$CACHE/000META")
 CMD="${@}"; [[ -z $CMD ]] && CMD="echo"
 APP=${1:-dropterm}
-$RESET && { rm -rf $FLOATWIN; echo "cache cleared."; exit 0; }
+$RESET && { rm -rf $CACHE; echo "cache cleared."; exit 0; }
 $TERMINAL && { CLASS=${CLASS:-$APP}; INSTANCE=${INSTANCE:-$CLASS}; }
 [[ -n $INDEX ]] && INSTANCE=$INSTANCE.$INDEX
-APP_CACHE=$FLOATWIN/$APP.${INDEX:-0}
+APP_CACHE=$CACHE/$APP.${INDEX:-0}
 $INTERCEPT && { _intercept; exit 0; }
 WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
 
