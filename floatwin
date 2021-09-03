@@ -67,13 +67,17 @@ _create_window() {
   [[ -z $GEO ]] && GEO=$(__config_get Geo $APP)
   [[ -z $GEO ]] && GEO=$DEFAULT_GEO
   __parse_dimension
-  t_cmd=(alacritty --class $INSTANCE,$CLASS)
-  [[ "$APP" == "dropterm" ]] || t_cmd+=("-e ${CMD[@]}")
-  t_cmd=(`echo ${t_cmd[@]} | sed 's/\"/\\\"/g'`)
-  g_cmd=(`echo ${CMD[@]} | sed 's/\"/\\\"/g'`)
+  local cmd=$CMD
+  $TERMINAL && {
+    local term=$(__config_get General terminal)
+    [[ -z $term ]] && term=alacritty
+    cmd=($term --title $APP)
+    [[ -n $CMD ]] && cmd+=("-e ${CMD[@]}")
+  }
+  cmd=(`echo ${cmd[@]} | sed 's/\"/\\\"/g'`)
   _intercept &
   $TILING || __add_float_rule
-  $TERMINAL && eval "${t_cmd[@]} &" || eval "${g_cmd[@]} &"
+  eval "${cmd[@]} &"
   __run_hook $AFTER_CREATE
 }
 _intercept() {
@@ -84,7 +88,7 @@ _intercept() {
   [[ -n $NAME ]] && search+=("-a $NAME")
   counter=0
   while true; do
-    wid=$(eval ${search[@]})
+    wid=$(eval ${search[@]} 2>/dev/null)
     [[ -n $wid ]] && break
     [[ $counter -gt $timeout ]] && { exceeded=true; break; }
     sleep .01; counter=$((counter + 1))
