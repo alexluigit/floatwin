@@ -94,6 +94,11 @@ _intercept() {
   echo $wid >> $APP_CACHE
 }
 _log() { echo "$@" >> $CACHE/log; }
+_get_class() {
+  local arg=$(__config_get Class $APP)
+  [[ -z $arg ]] && { CLASS=$APP; TILING=true; return; }
+  CLASS=${arg%:*}; INSTANCE=${arg#*:}
+}
 _meta() {
   local id=$(xprop -root -notype _NET_SUPPORTING_WM_CHECK); id=${id##* }
   wm=$(xprop -notype -id "$id" _NET_WM_NAME | head -n 1); wm=${wm##* }; wm=${wm//\"/}
@@ -129,9 +134,9 @@ shift $((OPTIND -1))
 
 WM=$(cat "$CACHE/000META")
 CMD="${@}"; [[ -z $CMD ]] && CMD="echo"
-APP=${1:-dropterm}
+APP=$1; $TERMINAL && NAME=$APP
 $RESET && { rm -rf $CACHE; echo "cache cleared."; exit 0; }
-$TERMINAL && { CLASS=${CLASS:-$APP}; INSTANCE=${INSTANCE:-$CLASS}; }
+[[ -z $CLASS ]] && _get_class
 [[ -n $INDEX ]] && INSTANCE=$INSTANCE.$INDEX
 APP_CACHE=$CACHE/$APP.${INDEX:-0}
 WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
