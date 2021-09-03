@@ -84,13 +84,12 @@ _intercept() {
   [[ -n $NAME ]] && search+=("-a $NAME")
   counter=0
   while true; do
-    new_wid=$(eval ${search[@]})
-    [[ -n $new_wid ]] && break
+    wid=$(eval ${search[@]})
+    [[ -n $wid ]] && break
     [[ $counter -gt $timeout ]] && { exceeded=true; break; }
     sleep .01; counter=$((counter + 1))
   done
-  $exceeded && _log "Wait for $CLASS:${INTERCEPT_FROM:-$INSTANCE} timeout." && exit 1;
-  wid=$new_wid; [[ -n $INTERCEPT_FROM ]] && xdotool set_window --classname $INSTANCE $wid
+  $exceeded && _log "Wait for $CLASS:$INSTANCE timeout." && exit 1;
   _show_window $wid
   echo $wid >> $APP_CACHE
 }
@@ -106,13 +105,12 @@ CACHE="$XDG_CACHE_HOME/floatwin"
 DEFAULT_GEO=1920x1080+50+50
 TERMINAL=false
 RESET=false
-INTERCEPT=false
 TILING=false
 
 [[ -d "$CACHE" ]] || mkdir -p $CACHE
 [[ -f "$CACHE/000META" ]] || _meta
 
-while getopts "a:A:b:B:c:f:g:i:I:n:tTr" opt; do
+while getopts "a:A:b:B:c:g:i:n:tTr" opt; do
   case $opt in
     a) AFTER_MAP=$OPTARG;;
     b) BEFORE_MAP=$OPTARG;;
@@ -120,9 +118,7 @@ while getopts "a:A:b:B:c:f:g:i:I:n:tTr" opt; do
     B) BEFORE_CREATE=$OPTARG;;
     c) CLASS=${OPTARG%:*}; INSTANCE=${OPTARG#*:};;
     g) GEO=$OPTARG;;
-    f) INTERCEPT_FROM=$OPTARG;;
     i) INDEX=$OPTARG;;
-    I) INTERCEPT=true; CLASS=${OPTARG%:*}; INSTANCE=${OPTARG#*:};;
     n) NAME=$OPTARG;;
     T) TILING=true;;
     t) TERMINAL=true;;
@@ -138,7 +134,6 @@ $RESET && { rm -rf $CACHE; echo "cache cleared."; exit 0; }
 $TERMINAL && { CLASS=${CLASS:-$APP}; INSTANCE=${INSTANCE:-$CLASS}; }
 [[ -n $INDEX ]] && INSTANCE=$INSTANCE.$INDEX
 APP_CACHE=$CACHE/$APP.${INDEX:-0}
-$INTERCEPT && { _intercept; exit 0; }
 WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
 
 if _wid_expired; then _create_window
