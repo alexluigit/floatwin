@@ -101,15 +101,6 @@ _meta() {
   echo $wm > $CACHE/000META
 }
 
-toggle_or_create() {
-  if _wid_expired; then _create_window
-  elif _win_visible; then
-    _win_is_current && _hide_window || _pop_window
-  else
-    _show_window
-  fi
-}
-
 CONFIG="$XDG_CONFIG_HOME/floatwin.conf"
 CACHE="$XDG_CACHE_HOME/floatwin"
 DEFAULT_GEO=1920x1080+50+50
@@ -150,4 +141,6 @@ APP_CACHE=$CACHE/$APP.${INDEX:-0}
 $INTERCEPT && { _intercept; exit 0; }
 WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
 
-toggle_or_create
+if _wid_expired; then _create_window
+elif _win_visible; then _win_is_current && _hide_window || _pop_window
+else _show_window; fi
