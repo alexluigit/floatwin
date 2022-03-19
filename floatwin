@@ -57,6 +57,8 @@ _show_window() {
     w=$(sed -n 1p $APP_CACHE) h=$(sed -n 2p $APP_CACHE)
     x=$(sed -n 3p $APP_CACHE) y=$(sed -n 4p $APP_CACHE)
     [[ $state == "floating" ]] && __add_float_rule
+    xdotool windowstate --remove MAXIMIZED_HORZ ${1:-$WID}
+    sleep 0.02
     xdotool windowmap ${1:-$WID} windowmove ${1:-$WID} $x $y windowsize ${1:-$WID} $w $h
   fi
   __run_hook $AFTERMAP
@@ -84,8 +86,7 @@ _intercept() {
   local wid timeout=1000 exceeded=false
   local search=(xdo id -d)
   [[ -n $CLASS ]] && search+=("-N $CLASS")
-  [[ -n $INSTANCE ]] && search+=("-n $INSTANCE")
-  [[ -n $NAME ]] && search+=("-a $NAME")
+  [[ -n $NAME ]] && search+=("-a '$NAME'") || { [[ -n $INSTANCE ]] && search+=("-n $INSTANCE"); }
   counter=0
   while true; do
     wid=$(eval ${search[@]} 2>/dev/null)
@@ -141,7 +142,6 @@ CMD="${@}"; [[ -z $CMD ]] && CMD="echo"
 APP=$1; $TERMINAL && NAME=$APP
 $RESET && { rm -rf $CACHE; echo "cache cleared."; exit 0; }
 [[ -z $CLASS ]] && _get_class
-[[ -n $INDEX ]] && INSTANCE=$INSTANCE.$INDEX
 APP_CACHE=$CACHE/$APP.${INDEX:-0}
 WID=$(tail -n 1 "$APP_CACHE" 2>/dev/null)
 
